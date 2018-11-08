@@ -39,12 +39,19 @@ function module.start(connectedCallback)
     print("Configured SSID: " .. ssid)
     -- clear variables after usage for security
     ssid, password, bssid_set, bssid = nil, nil, nil, nil
-    wifi.setmode(wifi.STATION)
+    mode = wifi.getmode()
+    if mode ~= wifi.STATION then
+        -- only set the mode if necessary to avoid writing to the flash memory
+        print("setting wifi mode to STATION")
+        wifi.setmode(wifi.STATION)
+    end
     -- configure wifi
     station_cfg = {}
     station_cfg.ssid = config.wifi.ssid
     station_cfg.pwd = config.wifi.password
-    station_cfg.save = true
+    -- use this config
+    station_cfg.save = false
+    -- connect manually later
     station_cfg.auto = false
     wifi.sta.config(station_cfg)
     -- connect
