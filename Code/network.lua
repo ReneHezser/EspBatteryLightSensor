@@ -18,12 +18,12 @@ local function waitForIp(connectedCallback)
         function()
             if wifi.sta.getip() == nil then
                 if wifi_status_codes[wifi.sta.status()] ~= nil then
-                    print('Waiting for IP address! (Status: ' .. wifi_status_codes[wifi.sta.status()] .. ')')
+                    print('Network: Waiting for IP address (Status: ' .. wifi_status_codes[wifi.sta.status()] .. ')')
                 else
-                    print('Waiting for IP address!')
+                    print('Network: Waiting for IP address...')
                 end
             else
-                print('New IP address is ' .. wifi.sta.getip())
+                print('Network: New IP address is ' .. wifi.sta.getip())
                 ipTimer:unregister()
                 connectedCallback()
             end
@@ -33,16 +33,16 @@ local function waitForIp(connectedCallback)
 end
 
 function module.start(connectedCallback)
-    print('Configuring Wifi...')
+    print('Network: Configuring Wifi...')
 
     ssid, password, bssid_set, bssid = wifi.sta.getconfig()
-    print('Configured SSID: ' .. ssid)
+    print('Network: Configured SSID: ' .. ssid)
     -- clear variables after usage for security
     ssid, password, bssid_set, bssid = nil, nil, nil, nil
     mode = wifi.getmode()
     if mode ~= wifi.STATION then
         -- only set the mode if necessary to avoid writing to the flash memory
-        print('setting wifi mode to STATION')
+        print('Network: Setting wifi mode to STATION')
         wifi.setmode(wifi.STATION)
     end
     -- configure wifi
@@ -66,11 +66,20 @@ function module.start(connectedCallback)
                 gateway = config.wifi.gateway
             }
         )
+        -- wait for connection
+        print('Network: Waiting for network connection...')
+        wifi.eventmon.register(
+            wifi.eventmon.STA_CONNECTED,
+            function(T)
+                print('\n\tSTA - CONNECTED' .. '\n\tSSID: ' .. T.SSID .. '\n\tBSSID: ' .. T.BSSID .. '\n\tChannel: ' .. T.channel .. '\n')
+                connectedCallback()
+            end
+        )
+    else
+        -- wait for an IP
+        print('Network: Waiting for wifi...')
+        waitForIp(connectedCallback)
     end
-
-    -- wait for an IP
-    print('Waiting for wifi...')
-    waitForIp(connectedCallback)
 end
 
 return module

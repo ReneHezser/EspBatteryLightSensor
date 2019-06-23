@@ -19,7 +19,7 @@ local function readLux(integrationTime)
         lux = config.lux.max
     end
 
-    print('  lux:' .. lux .. ', raw values (Ch1-Ch2):' .. ch0 .. '-' .. ch1)
+    print('Sensor: Values are lux:' .. lux .. ', raw values (Ch1-Ch2):' .. ch0 .. '-' .. ch1)
 
     -- power down the sensor
     gpio.write(config.pins.activateTsl, gpio.LOW)
@@ -43,9 +43,9 @@ end
 local function goSleep()
     -- do not sleep if battery is near 0. This way you can disconnect the battery to flash/upload
     if lastVoltage / config.voltage.multiplicator < config.voltage.ignoreAdcValuesBelow then
-        print("Done. But don't sleep as the battery is not connected.")
+        print("Application: Done. But don't sleep as the battery is not connected.")
     else
-        print('Going to sleep for ' .. config.lux.measureInterval .. ' minutes. Bye.')
+        print('Application: Going to sleep for ' .. config.lux.measureInterval .. ' minutes. Bye.')
         -- go sleep again and hope the voltage will rise again
         local sleepTime = config.lux.measureInterval * 60 * 1000 * 1000
         node.dsleep(sleepTime, 2, 1)
@@ -53,122 +53,117 @@ local function goSleep()
 end
 
 -- send values and go to deep sleep for 5 minutes
-local function send_to_mqtt()
+function send_to_mqtt()
     -- assume only port 1883 is unsecure (meaning no TLS)
     local secure = 0
     if config.mqtt.port ~= 1883 then
         secure = 1
     end
 
+    print('MQTT: Connecting to ' .. config.mqtt.url .. ' on port ' .. config.mqtt.port .. ' with secure=' .. secure)
     success =
         m:connect(
         config.mqtt.url,
         config.mqtt.port,
         secure,
+        --0, -- autoreconnect is deprecated
         function(client)
-            print('connected')
             local data = '{"lux":"' .. lux .. '","voltage":"' .. lastVoltage .. '","readCount":"' .. readValueCount .. '"}'
-            print('now sending data: ' .. data)
+            print('MQTT: Client connected. Now sending data: ' .. data)
             client:publish(
                 config.mqtt.topics.name,
                 data,
                 0, -- QoS level
                 0, -- retain
                 function(client)
-                    print('Data sent to mqtt topic. Going to sleep now.')
+                    print('MQTT: Data sent to mqtt topic. Closing connection.')
+                    m:close()
+
                     goSleep()
                     -- hint: after waking up the device will boot and not continue here
                 end
             )
         end,
         function(client, reason)
-            print('failed reason: ' .. reason)
-            tmr.create():alarm(3 * 1000, tmr.ALARM_SINGLE, send_to_mqtt)
+            print('MQTT: Client failed reason: ' .. reason)
+            print('MQTT: retrying in 1s.')
+            tmr.create():alarm(1 * 1000, tmr.ALARM_SINGLE, send_to_mqtt)
         end
     )
 
     if success == false then
-        print('Connection failed.')
+        print('MQTT: Client connection failed.')
     end
 end
 
 -- configure mqtt and send values
 local function configureMqtt()
+    print('Application: Creating MQTT client.')
     m = mqtt.Client(config.mqtt.deviceId, 120)
     m:on(
         'connect',
         function(client)
-            print('Connected to MQTT. Reading values and sending...')
+            print('MQTT: Connected callback.')
         end
     )
-    print('waiting for MQTT...')
+    
     send_to_mqtt()
 end
 
 -- start wifi and call configureMqtt
 local function startWifi()
-    print('Starting Wifi...')
+    print('Application: Starting Wifi...')
     network.start(
         function()
-            print('Got IP')
+            print('Network: Got IP')
             configureMqtt()
         end
     )
 end
 
--- set to 0 if nil or empty
-local function ensure_notnull(v)
-    if v == nil or v == '' then
-        v = 0
-    end
-end
-
 -- read sensor and send value if the brightness window changed
 local function readSensorValue()
-    print('reading sensor...')
+    print('Sensor: reading...')
     readLux(tsl2561.INTEGRATIONTIME_13MS)
     readValueCount = readValueCount + 1
-    print('  readValueCount: ' .. readValueCount)
+    --print('Sensor: readValueCount: ' .. readValueCount)
 
     -- save values so they will survive a deep sleep
-    print('  save values to rtc (' .. tostring(lux) .. ',' .. tostring(lastVoltage) .. ',' .. tostring(readValueCount) .. ')')
+    print('Sensor: Save values to rtc (' .. tostring(lux) .. ',' .. tostring(lastVoltage) .. ',' .. tostring(readValueCount) .. ')')
     rtcmem.write32(10, lux, lastVoltage, readValueCount)
 
     if getBrightness(lastLuxValue) ~= getBrightness(lux) then
-        print('Brightness changed from ' .. tostring(lastLuxValue) .. ' to ' .. tostring(lux) .. '')
+        print('Sensor: Brightness changed from ' .. tostring(lastLuxValue) .. ' to ' .. tostring(lux) .. '')
         startWifi()
     else
         -- hint: after waking up the device will boot and not continue here
-        print('Brightness did not change. Old:' .. tostring(lastLuxValue) .. ', new:' .. tostring(lux) .. '')
+        print('Sensor: Brightness did not change. Old:' .. tostring(lastLuxValue) .. ', new:' .. tostring(lux) .. '')
         goSleep()
     end
 end
 
 function module.start(voltage)
-    print('Application start (voltage: ' .. tostring(voltage) .. ')')
+    print('Application: Start (voltage: ' .. tostring(voltage) .. ')')
     -- set D5 to high to power up the sensor
     gpio.write(config.pins.activateTsl, gpio.HIGH)
 
     -- configure sensor
     status = tsl2561.init(config.pins.sda, config.pins.scl, tsl2561.ADDRESS_FLOAT, tsl2561.PACKAGE_T_FN_CL)
     if status == tsl2561.TSL2561_OK then
-        print('TSL2561 initialized')
+        print('Sensor: TSL2561 initialized')
         status = tsl2561.settiming(tsl2561.INTEGRATIONTIME_13MS, tsl2561.GAIN_1X)
 
         if status ~= tsl2561.TSL2561_OK then
-            print('Error Status setting timing:' .. status)
+            print('Sensor: Error Status setting timing:' .. status)
         end
     else
-        print('TSL2561 initialization failed with status: ' .. tostring(status))
+        print('Sensor: TSL2561 initialization failed with status: ' .. tostring(status))
     end
 
     -- get values from memory that survives deep sleep
-    print('Reading values from RTC...')
+    --print('Application: Reading values from RTC...')
     lastLuxValue, lastVoltage, readValueCount = rtcmem.read32(10, 3)
-    -- ensure_notnull(lastLuxValue)
-    -- ensure_notnull(lastVoltage)
-    -- ensure_notnull(readValueCount)
-    print('  lux:' .. lastLuxValue .. ', voltage:' .. lastVoltage .. ', readCount:' .. readValueCount)
+    print('Application: Values from RTC are lux:' .. lastLuxValue .. ', voltage:' .. lastVoltage .. ', readCount:' .. readValueCount)
     -- overwrite with current value
     lastVoltage = voltage
 
