@@ -106,7 +106,7 @@ local function configureMqtt()
             print('MQTT: Connected callback.')
         end
     )
-    
+
     send_to_mqtt()
 end
 
@@ -127,12 +127,18 @@ local function readSensorValue()
     readLux(tsl2561.INTEGRATIONTIME_13MS)
     readValueCount = readValueCount + 1
     --print('Sensor: readValueCount: ' .. readValueCount)
+    -- send values at least once an hour. measureInterval is 5 (minutes)
+    hourlySend = tonumber(readValueCount) >= 60 / tonumber(config.lux.measureInterval)
+    if hourlySend then
+        print('Sensor: send value at least once an hour.')
+        readValueCount = 0
+    end
 
     -- save values so they will survive a deep sleep
     print('Sensor: Save values to rtc (' .. tostring(lux) .. ',' .. tostring(lastVoltage) .. ',' .. tostring(readValueCount) .. ')')
     rtcmem.write32(10, lux, lastVoltage, readValueCount)
 
-    if getBrightness(lastLuxValue) ~= getBrightness(lux) then
+    if getBrightness(lastLuxValue) ~= getBrightness(lux) or hourlySend then
         print('Sensor: Brightness changed from ' .. tostring(lastLuxValue) .. ' to ' .. tostring(lux) .. '')
         startWifi()
     else
@@ -163,6 +169,9 @@ function module.start(voltage)
     -- get values from memory that survives deep sleep
     --print('Application: Reading values from RTC...')
     lastLuxValue, lastVoltage, readValueCount = rtcmem.read32(10, 3)
+    if readValueCount < 0 then
+        readValueCount = 0
+    end
     print('Application: Values from RTC are lux:' .. lastLuxValue .. ', voltage:' .. lastVoltage .. ', readCount:' .. readValueCount)
     -- overwrite with current value
     lastVoltage = voltage
